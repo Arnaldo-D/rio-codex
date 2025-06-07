@@ -52,9 +52,9 @@ def build_prompt() -> str:
     {tests}
     ```
 
-    Return ONLY a unified git diff.
-          **All paths must be relative to the repository root.
-           The file to patch is scripts/rio_pipeline_retry.py (not in root).**
+    Return ONLY a git diff.
+    The file is scripts/rio_pipeline_retry.py.
+    ✅ IMPORTANT: Generate the diff **against the current HEAD** so it applies with `git apply --check` without offsets or missing context.
  """).strip()
 
 # ----------------------------------------------------------------------
