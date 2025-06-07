@@ -1,100 +1,79 @@
-import subprocess, pathlib, os, tempfile, textwrap, sys
-from openai import OpenAI   # nuova API (>=1.0)
+#!/usr/bin/env python3
+"""
+Codex Auto-Fix helper
+--------------------
 
-ROOT   = pathlib.Path(__file__).resolve().parents[1]
-client = OpenAI()           # legge OPENAI_API_KEY da variabile d’ambiente
-client.timeout = 120        # fail fast se l’API impiega >120 s
+• Riceve il log dei test falliti (pytest.log) dall’artifact `test_failures`
+• Costruisce un prompt per GPT-4o-mini con il contesto del codice
+• Ottiene un diff unificato e lo applica:
+    1. prova `git apply --check` (rigoroso)
+    2. se fallisce, tenta `patch -p1 --fuzz=3` (applica con contesto fuzzy)
+• Rilancia `pytest -q` – se i test restano rossi il workflow termina failure
+"""
 
-# ----------------------------------------------------------------------
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+import textwrap
+import pathlib
+
+from openai import OpenAI
+
+# -----------------------------------------------------------
+# 0 · Config
+# -----------------------------------------------------------
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+client = OpenAI()        # legge OPENAI_API_KEY dall'ambiente GitHub
+client.timeout = 120     # fail-fast se l'API impiega > 120 s
+
+MODEL = "gpt-4o-mini"
+PATCH_TARGET = "scripts/rio_pipeline_retry.py"
+
+
+# -----------------------------------------------------------
+# utilità shell
+# -----------------------------------------------------------
 def sh(cmd: str) -> str:
-    """Esegue comando shell e ritorna stdout."""
-    return subprocess.run(cmd, shell=True, text=True,
-                          capture_output=True, check=True).stdout
+    """Esegue un comando shell e restituisce stdout, solleva se exit≠0."""
+    return subprocess.run(
+        cmd, shell=True, text=True, capture_output=True, check=True
+    ).stdout
 
-# ----------------------------------------------------------------------
+
+# -----------------------------------------------------------
+# 1 · Legge il log dei test falliti (artifact)
+# -----------------------------------------------------------
 def load_failures(max_chars: int = 1500) -> str:
-    """Legge il log dei test falliti da vari percorsi possibili."""
-    for p in [
+    for path in [
         ROOT / "test_failures" / "pytest.log",
         ROOT / "pytest.log",
         ROOT / "test_failures.txt",
     ]:
-        if p.exists():
-            return p.read_text()[:max_chars]
+        if path.exists():
+            return path.read_text()[:max_chars]
     return "Failure log not found."
 
-# ----------------------------------------------------------------------
+
+# -----------------------------------------------------------
+# 2 · Prompt builder
+# -----------------------------------------------------------
 def build_prompt() -> str:
     failures = load_failures()
-    src   = (ROOT / "scripts" / "rio_pipeline_retry.py").read_text()[:4000]
+    src = (ROOT / PATCH_TARGET).read_text()[:4000]
     tests = (ROOT / "tests" / "test_kpi.py").read_text()[:1500]
 
-    return textwrap.dedent(f"""
-    You are Codex acting as an automated CI fixer for project RIO.
+    prompt = f"""
+You are Codex acting as an automated CI fixer for project RIO.
 
-    KPI to satisfy:
-      • ROI_preciso ≥ 15
-      • rischio == "Basso"
-      • pass_ratio ≥ 0.90
+### KPI that *must* be satisfied
+• ROI_preciso ≥ 15
+• rischio == "Basso"
+• pass_ratio ≥ 0.90
 
-    Failing tests log:
-    ```text
-    {failures}
-    ```
-
-    Code context:
-    ### rio_pipeline_retry.py
-    ```python
-    {src}
-    ```
-    ### test_kpi.py
-    ```python
-    {tests}
-    ```
-
-    Return ONLY a git diff.
-    The file is scripts/rio_pipeline_retry.py.
-    ✅ IMPORTANT: Generate the diff **against the current HEAD** so it applies with `git apply --check` without offsets or missing context.
- """).strip()
-
-# ----------------------------------------------------------------------
-def diff_from_codex(prompt: str) -> str:
-    """Invia il prompt a GPT-4o-mini e restituisce il diff."""
-    print("⇢ Calling OpenAI…", flush=True)
-    rsp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-    )
-    print("✓ Received diff", flush=True)
-    return rsp.choices[0].message.content
-
-# ----------------------------------------------------------------------
-def apply_patch(patch: str):
-    """Prova il diff in modalità --check prima di applicarlo.
-       Se fallisce, stampa il patch per debug e solleva l'errore."""
-    with tempfile.NamedTemporaryFile("w+", delete=False) as tf:
-        tf.write(patch)
-    try:
-        # dry-run: se non si applica, git restituisce exit code ≠ 0
-        sh(f"git apply --check {tf.name}")
-        # ok, lo applichiamo davvero
-        sh(f"git apply {tf.name}")
-    except subprocess.CalledProcessError:
-        print("✗ Patch non applicabile — diff prodotto da Codex:\n")
-        print(patch)
-        raise
-    finally:
-        os.unlink(tf.name)
-
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    patch = diff_from_codex(build_prompt())
-    apply_patch(patch)
-
-    # riesegui i test; se falliscono, il job Actions terminerà failure
-    try:
-        sh("pytest -q")
-    except subprocess.CalledProcessError as e:
-        sys.stderr.write("Tests still failing after patch\n")
-        sys.exit(e.returncode)
+### Failing tests (trimmed):
+```text
+{failures}
