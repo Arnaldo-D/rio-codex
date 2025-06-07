@@ -1,6 +1,5 @@
 name: Codex Auto-Fix
 
-# parte SOLO quando il workflow "CI" termina in failure
 on:
   workflow_run:
     workflows: ["CI"]
@@ -8,43 +7,60 @@ on:
     conclusions: [failure]
 
 permissions:
-  contents: write          # per pushare la branch
-  pull-requests: write     # per aprire la PR
+  contents: write
+  pull-requests: write
 
 jobs:
   bot:
     runs-on: ubuntu-latest
 
     steps:
-      # 1 · Checkout del branch che ha fallito
+      # 1 · Checkout il branch che ha fallito
       - name: Checkout failing branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
 
-      # 2 · Scarica l'artifact test_failures dal run CI che ha fallito
+      # 2 · DEBUG: elenca artefatti presenti nel run CI
+      - name: List artifacts in failing CI run
+        uses: actions/github-script@v7
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const run_id   = process.env.RUN_ID;
+            const arts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              run_id
+            });
+            core.info(`Artifacts for run ${run_id}:`);
+            for (const a of arts.data.artifacts) {
+              core.info(`- ${a.name} (${a.size_in_bytes} bytes)`);
+            }
+
+      # 3 · Scarica l'artefatto test_failures dal run CI
       - name: Download test report
         uses: actions/download-artifact@v4
         with:
           name: test_failures
           run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .
 
-      # 3 · Setup Python & deps
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      # 4 · Setup Python
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
 
-      - name: Install dependencies
-        run: pip install openai pytest
+      - run: pip install openai pytest
 
-      # 4 · Lancia lo script che chiede la patch a Codex
+      # 5 · Chiede la patch a Codex
       - name: Run Codex patcher
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python scripts/codex_patch.py
 
-      # 5 · Se i test ora passano, push su branch bot + PR automatica
+      # 6 · Se i test ora passano, push branch e apri PR
       - name: Push fix & open PR
         if: success()
         env:
