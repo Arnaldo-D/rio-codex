@@ -1,5 +1,6 @@
 name: Codex Auto-Fix
 
+# Parte solo quando il workflow "CI" finisce in failure
 on:
   workflow_run:
     workflows: ["CI"]
@@ -7,39 +8,37 @@ on:
     conclusions: [failure]
 
 permissions:
-  contents: write
-  pull-requests: write
+  actions: read           # per scaricare artifact di altri run
+  contents: write         # per pushare la branch
+  pull-requests: write    # per aprire la PR
 
 jobs:
   bot:
     runs-on: ubuntu-latest
 
     steps:
-      # 1 · Checkout il branch che ha fallito
+      # 1 · Checkout del branch che ha fallito la CI
       - name: Checkout failing branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
 
-      # 2 · DEBUG: elenca artefatti presenti nel run CI
-      - name: List artifacts in failing CI run
+      # 2 · (Facoltativo) elenco artefatti disponibili nel run CI
+      - name: List artifacts in CI run
         uses: actions/github-script@v7
         env:
           RUN_ID: ${{ github.event.workflow_run.id }}
         with:
           script: |
-            const run_id   = process.env.RUN_ID;
             const arts = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo:  context.repo.repo,
-              run_id
+              run_id: process.env.RUN_ID
             });
-            core.info(`Artifacts for run ${run_id}:`);
-            for (const a of arts.data.artifacts) {
-              core.info(`- ${a.name} (${a.size_in_bytes} bytes)`);
-            }
+            core.info(`Artifacts in CI run ${process.env.RUN_ID}:`);
+            for (const a of arts.data.artifacts) core.info(`- ${a.name}`);
 
-      # 3 · Scarica l'artefatto test_failures dal run CI
+      # 3 · Scarica pytest.log (se c'è) — NON fallisce se manca
       - name: Download test report
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -49,19 +48,20 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: .
 
-      # 4 · Setup Python
+      # 4 · Ambiente Python
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - run: pip install openai pytest
 
-      # 5 · Chiede la patch a Codex
+      # 5 · Esegui lo script che chiede la patch a Codex
       - name: Run Codex patcher
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python scripts/codex_patch.py
 
-      # 6 · Se i test ora passano, push branch e apri PR
+      # 6 · Se i test ora passano, crea branch + PR
       - name: Push fix & open PR
         if: success()
         env:
@@ -69,12 +69,10 @@ jobs:
         run: |
           git config --global user.name  "codex-bot"
           git config --global user.email "bot@users.noreply.github.com"
-
           BR="codex-bot/fix-${{ github.event.workflow_run.head_sha }}"
           git checkout -b "$BR"
           git commit -am "codex: auto-fix KPI tests"
           git push -u origin "$BR"
-
           gh pr create \
             --title "Codex auto-fix for ${{ github.event.workflow_run.head_sha }}" \
             --body  "Patch generated automatically by Codex to fix failing KPI tests." \
