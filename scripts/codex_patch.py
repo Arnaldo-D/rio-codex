@@ -64,7 +64,6 @@ def diff_from_codex(prompt: str) -> str:
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,
-        request_timeout=120,       # timeout per questa singola request
     )
     print("✓ Received diff", flush=True)
     return rsp.choices[0].message.content
