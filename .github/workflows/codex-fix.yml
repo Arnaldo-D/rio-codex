@@ -1,0 +1,37 @@
+name: Codex Auto-Fix
+on:
+  workflow_run:
+    workflows: ["CI"]       # deve combaciare con name: CI
+    types: [completed]
+
+jobs:
+  bot:
+    if: |
+      github.event.workflow_run.conclusion == 'failure' &&
+      !startsWith(github.event.workflow_run.head_branch, 'codex-bot/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: test_failures
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install openai pytest
+      - name: Run Codex patcher
+        env: { OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} }
+        run: python scripts/codex_patch.py
+      - name: Push & PR  (solo se i test passano)
+        if: success()
+        env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        run: |
+          git config user.name  "codex-bot"
+          git config user.email "bot@users.noreply.github.com"
+          BR="codex-bot/fix-${{ github.sha }}"
+          git checkout -b $BR
+          git commit -am "codex: auto-fix KPI failure"
+          git push -u origin $BR
+          gh pr create --title "Codex auto-fix for ${{ github.sha }}" \
+                       --body  "Patch generated automatically by Codex."

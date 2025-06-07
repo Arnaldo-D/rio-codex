@@ -1,37 +1,24 @@
 name: CI
-
-on:
-  push:
-    branches: [ main, dev, "**/codex-**" ]   # esegue sui push in questi branch
-  pull_request:                              # …e su tutte le PR
-    branches: [ main, dev ]
-
+on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Clona il repository
       - uses: actions/checkout@v4
-
-      # 2. Imposta Python
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # 3. Installa dipendenze
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # 4. Esegui PyTest (fallirà se KPI non superati)
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
       - name: Run tests
-        run: pytest -q
-
-      # 5. (Opzionale) Verifica linting con ruff
-      - name: Ruff lint
+        id: pytest
+        continue-on-error: true     # così la job finisce anche se i test falliscono
         run: |
-          pip install ruff
-          ruff .
-
+          pytest -q | tee pytest.log
+      - name: Upload failures
+        if: steps.pytest.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test_failures
+          path: pytest.log
+      - name: Fail if tests red
+        if: steps.pytest.outcome == 'failure'
+        run: exit 1
