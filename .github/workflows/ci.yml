@@ -1,24 +1,37 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
+      # 1 · Clona il codice
       - uses: actions/checkout@v4
+
+      # 2 · Setup Python
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -r requirements.txt
+        with:
+          python-version: "3.11"
+
+      # 3 · Installa dipendenze
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 4 · Esegui i test
       - name: Run tests
-        id: pytest
-        continue-on-error: true     # così la job finisce anche se i test falliscono
+        id: pytest_step
         run: |
-          pytest -q | tee pytest.log
+          set -o pipefail          # Propaga l'exit-code di pytest in pipe
+          pytest -q 2>&1 | tee pytest.log
+
+      # 5 · Carica il log SOLO se i test falliscono
       - name: Upload failures
-        if: steps.pytest.outcome == 'failure'
+        if: failure()              # questo step parte solo se il job è in failure
         uses: actions/upload-artifact@v4
         with:
           name: test_failures
           path: pytest.log
-      - name: Fail if tests red
-        if: steps.pytest.outcome == 'failure'
-        run: exit 1
