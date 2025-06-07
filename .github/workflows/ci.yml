@@ -9,23 +9,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1 · Checkout sorgente
       - uses: actions/checkout@v4
 
+      # 2 · Python
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
+      # 3 · Dipendenze
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ⬇️  NUOVO: esegue la pipeline per creare rio_best_precision.csv
+      # 4 · Genera il CSV (usa GASTA_API_KEY se presente; fallback sintetico altrimenti)
       - name: Generate CSV
+        env:
+          GASTA_API_KEY: ${{ secrets.GASTA_API_KEY }}
         run: python scripts/rio_pipeline_retry.py
 
+      # 5 · Esegui i test KPI
       - name: Run tests
         run: |
           set -o pipefail
           pytest -q 2>&1 | tee pytest.log
 
+      # 6 · Carica il log SOLO se i test falliscono
       - name: Upload failures
         if: failure()
         uses: actions/upload-artifact@v4
