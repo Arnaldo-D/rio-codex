@@ -4,3 +4,4 @@ pandas
 tqdm
 pyyaml
 pytest
+requests
