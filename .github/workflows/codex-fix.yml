@@ -41,6 +41,7 @@ jobs:
 
       # 3 · Scarica l'artefatto test_failures dal run CI
       - name: Download test report
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: test_failures
