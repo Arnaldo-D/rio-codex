@@ -52,9 +52,10 @@ def build_prompt() -> str:
     {tests}
     ```
 
-    Return ONLY a valid unified git diff that fixes the failure.
-    Do not add explanations or markdown fences.
-    """).strip()
+    Return ONLY a unified git diff.
+          **All paths must be relative to the repository root.
+           The file to patch is scripts/rio_pipeline_retry.py (not in root).**
+ """).strip()
 
 # ----------------------------------------------------------------------
 def diff_from_codex(prompt: str) -> str:
