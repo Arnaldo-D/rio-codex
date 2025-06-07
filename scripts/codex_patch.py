@@ -71,11 +71,19 @@ def diff_from_codex(prompt: str) -> str:
 
 # ----------------------------------------------------------------------
 def apply_patch(patch: str):
-    """Applica il diff git ricevuto da Codex."""
+    """Prova il diff in modalità --check prima di applicarlo.
+       Se fallisce, stampa il patch per debug e solleva l'errore."""
     with tempfile.NamedTemporaryFile("w+", delete=False) as tf:
         tf.write(patch)
     try:
+        # dry-run: se non si applica, git restituisce exit code ≠ 0
+        sh(f"git apply --check {tf.name}")
+        # ok, lo applichiamo davvero
         sh(f"git apply {tf.name}")
+    except subprocess.CalledProcessError:
+        print("✗ Patch non applicabile — diff prodotto da Codex:\n")
+        print(patch)
+        raise
     finally:
         os.unlink(tf.name)
 

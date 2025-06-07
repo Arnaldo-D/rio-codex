@@ -9,28 +9,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1 · Clona il codice
       - uses: actions/checkout@v4
 
-      # 2 · Setup Python
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        with: { python-version: "3.11" }
 
-      # 3 · Installa dipendenze
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 4 · Esegui i test
+      # ⬇️  NUOVO: esegue la pipeline per creare rio_best_precision.csv
+      - name: Generate CSV
+        run: python scripts/rio_pipeline_retry.py
+
       - name: Run tests
-        id: pytest_step
         run: |
-          set -o pipefail          # Propaga l'exit-code di pytest in pipe
+          set -o pipefail
           pytest -q 2>&1 | tee pytest.log
 
-      # 5 · Carica il log SOLO se i test falliscono
       - name: Upload failures
-        if: failure()              # questo step parte solo se il job è in failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test_failures
