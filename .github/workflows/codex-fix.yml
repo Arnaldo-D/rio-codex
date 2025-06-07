@@ -1,37 +1,59 @@
 name: Codex Auto-Fix
+
+# Parte soltanto se il workflow "CI" termina in failure
 on:
   workflow_run:
-    workflows: ["CI"]       # deve combaciare con name: CI
+    workflows: ["CI"]          # deve corrispondere al name: del tuo file ci.yml
     types: [completed]
+    conclusions: [failure]     # <— filtro decisivo
+
+permissions:
+  contents: write              # necessario per pushare la branch
+  pull-requests: write         # necessario per aprire la PR
 
 jobs:
   bot:
-    if: |
-      github.event.workflow_run.conclusion == 'failure' &&
-      !startsWith(github.event.workflow_run.head_branch, 'codex-bot/')
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Checkout del branch che ha fallito la CI
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
+
+      # 2. Scarica l'artifact con i log di pytest
       - uses: actions/download-artifact@v4
         with:
           name: test_failures
+
+      # 3. Ambiente Python
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
+
       - run: pip install openai pytest
+
+      # 4. Chiama lo script che genera e applica la patch
       - name: Run Codex patcher
-        env: { OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} }
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python scripts/codex_patch.py
-      - name: Push & PR  (solo se i test passano)
+
+      # 5. Se i test ora passano, crea branch + PR
+      - name: Push & open PR
         if: success()
-        env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name  "codex-bot"
-          git config user.email "bot@users.noreply.github.com"
-          BR="codex-bot/fix-${{ github.sha }}"
-          git checkout -b $BR
-          git commit -am "codex: auto-fix KPI failure"
-          git push -u origin $BR
-          gh pr create --title "Codex auto-fix for ${{ github.sha }}" \
-                       --body  "Patch generated automatically by Codex."
+          git config --global user.name  "codex-bot"
+          git config --global user.email "bot@users.noreply.github.com"
+
+          BR="codex-bot/fix-${{ github.event.workflow_run.head_sha }}"
+          git checkout -b "$BR"
+          git commit -am "codex: auto-fix failing KPI tests"
+          git push -u origin "$BR"
+
+          gh pr create \
+            --title "Codex auto-fix for ${{ github.event.workflow_run.head_sha }}" \
+            --body  "Patch generated automatically by Codex to fix failing KPI tests." \
+            --base  ${
