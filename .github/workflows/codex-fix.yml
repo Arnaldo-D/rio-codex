@@ -57,6 +57,7 @@ jobs:
 
       # 5 · Esegui lo script che chiede la patch a Codex
       - name: Run Codex patcher
+        continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python scripts/codex_patch.py
